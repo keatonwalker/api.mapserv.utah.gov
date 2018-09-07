@@ -1,0 +1,56 @@
+using System;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using api.mapserv.utah.gov.Models.ApiResponses;
+using api.mapserv.utah.gov.Models.Configuration;
+using Dapper;
+using MediatR;
+using Microsoft.Extensions.Options;
+
+namespace SqlQuery {
+    public class Command : IRequest<IReadOnlyCollection<SearchApiResponse>> {
+        public Command(string tableName, string returnValues, string predicate) {
+            TableName = tableName;
+            ReturnValues = returnValues;
+            Predicate = predicate;
+        }
+
+        public string TableName { get; }
+        public string ReturnValues { get; }
+        public string Predicate { get; }
+    }
+
+    public class Handler : IRequestHandler<Command, IReadOnlyCollection<SearchApiResponse>> {
+        private const string ShapeToken = "SHAPE@";
+        private readonly string _connectionString;
+        public Handler(IOptions<SearchDatabaseConfiguration> dbOptions) {
+            _connectionString = dbOptions.Value.ConnectionString;
+        }
+
+        public async Task<IReadOnlyCollection<SearchApiResponse>> Handle(Command request, CancellationToken cancellationToken) {
+            if (string.IsNullOrEmpty(request.TableName)) {
+                return null;
+            }
+
+            using (var session = new SqlConnection(_connectionString)) {
+                session.Open();
+
+                var whereClause = $"SELECT {request.ReturnValues} FROM {request.TableName}";
+
+                if (!string.IsNullOrEmpty(request.Predicate)) {
+                    whereClause += $" WHERE {request.Predicate}";
+                }
+
+                var queryResults = await session.QueryAsync(whereClause);
+
+                // TODO: Format attribute names based on attribute style #9
+                return queryResults.Select(x => new SearchApiResponse {
+                    Attributes = x
+                }).AsList();
+            }
+        }
+    }
+}
